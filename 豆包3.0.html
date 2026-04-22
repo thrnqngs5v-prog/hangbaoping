@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+<title>多人互动夯爆瓶</title>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  min-height: 100vh;
+  background: #0f0f1e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+  padding: 10px;
+  position: relative;
+}
+
+/* 顶部：夯爆值 + 倒计时 同行 */
+.top-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+
+/* 夯爆值 */
+.score-title {
+  font-size: clamp(24px, 6vw, 36px);
+  color: #fff;
+  font-weight: bold;
+  text-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+  transition: all 0.2s ease;
+}
+.score-title.up {
+  transform: scale(1.15);
+  text-shadow: 0 0 20px gold;
+}
+
+/* 倒计时 */
+.countdown {
+  font-size: clamp(20px, 5vw, 30px);
+  color: #fff;
+  font-weight: bold;
+  background: rgba(0,0,0,0.3);
+  padding: 6px 12px;
+  border-radius: 12px;
+  min-width: 80px;
+  text-align: center;
+  box-shadow: 0 0 10px rgba(255,255,255,0.2);
+}
+.countdown.running {
+  color: #ffdd40;
+  text-shadow: 0 0 10px #ffdd40;
+}
+.countdown.end {
+  color: #ff4444;
+}
+
+/* 瓶子 */
+.bottle-container {
+  position: relative;
+  width: min(280px, 70vw);
+  height: min(500px, 80vh);
+}
+.bottle {
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 20px 20px 80px 80px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 星星容器 */
+.stars-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2;
+}
+
+/* 星星样式 + 发光 */
+.star {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 0 8px var(--star-color)) drop-shadow(0 0 16px var(--star-color));
+  animation: starPop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+@keyframes starPop {
+  0% {
+    transform: scale(0) rotate(0deg);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1) rotate(var(--rotate));
+    opacity: 1;
+  }
+}
+
+/* 夯按钮 */
+.hammer-btn {
+  width: min(120px, 28vw);
+  height: min(120px, 28vw);
+  border-radius: 50%;
+  background: linear-gradient(45deg, #ff6b6b, #ff4757);
+  color: #fff;
+  font-size: clamp(36px, 8vw, 52px);
+  font-weight: bold;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(255, 107, 107, 0.4);
+  transition: all 0.15s ease;
+  margin-top: 24px;
+  user-select: none;
+  touch-action: manipulation;
+}
+.hammer-btn:active {
+  transform: scale(0.92);
+  box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+}
+
+/* 庆祝特效 —— 时间加长 */
+.celebration {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(32px, 8vw, 52px);
+  color: gold;
+  text-shadow: 0 0 20px gold;
+  font-weight: bold;
+  z-index: 999;
+  animation: popAway 2s ease forwards;
+  pointer-events: none;
+}
+@keyframes popAway {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  30% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+  70% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+</style>
+</head>
+
+<body>
+<!-- 顶部：夯爆值 + 倒计时 -->
+<div class="top-row">
+  <div class="score-title">夯爆值：<span id="score">0</span></div>
+  <div class="countdown" id="countdown">10</div>
+</div>
+
+<!-- 瓶子 -->
+<div class="bottle-container">
+  <div class="bottle">
+    <div class="stars-container" id="starsContainer"></div>
+  </div>
+</div>
+
+<!-- 按钮 -->
+<button class="hammer-btn" id="hammerBtn">夯</button>
+
+<script>
+const scoreEl = document.getElementById('score');
+const starsContainer = document.getElementById('starsContainer');
+const hammerBtn = document.getElementById('hammerBtn');
+const countdownEl = document.getElementById('countdown');
+const scoreTitle = document.querySelector('.score-title');
+
+// ============== 核心：全局共享夯爆值（多人共用） ==============
+let globalScore = 0;
+// ============================================================
+
+let isRunning = false;
+let count = 10;
+let timer = null;
+let holdTimer = null;
+let canClick = true;
+const clickDelay = 80;
+
+// 星星颜色
+const colors = [
+  '#FFD700','#FF6B6B','#4ECDC4','#45B7D1',
+  '#96CEB4','#FF9F43','#DDA0DD','#54A0FF','#5F27CD'
+];
+
+// 星星SVG
+function starSVG(color) {
+  return `
+  <svg viewBox="0 0 100 100" fill="${color}" xmlns="http://www.w3.org/2000/svg">
+    <path d="M50 0L61.2 35.5L97.5 35.5L68.8 57L80.1 91.5L50 70.5L19.9 91.5L31.2 57L2.5 35.5L38.8 35.5L50 0Z" />
+  </svg>`;
+}
+
+// 震动
+function vibrateShort() {
+  if (navigator.vibrate) {
+    navigator.vibrate(25);
+  }
+}
+
+// 倒计时（每个人独立）
+function startTimer() {
+  if (isRunning) return;
+  isRunning = true;
+  countdownEl.classList.add('running');
+  timer = setInterval(() => {
+    count--;
+    countdownEl.textContent = count;
+    if (count <= 0) {
+      clearInterval(timer);
+      countdownEl.classList.add('end');
+      countdownEl.textContent = "结束";
+      hammerBtn.disabled = true;
+    }
+  }, 1000);
+}
+
+// 加星星（全局共享计数）
+function addStar() {
+  if (count <= 0) return;
+  if (!canClick) return;
+  canClick = false;
+  setTimeout(() => canClick = true, clickDelay);
+
+  // 全局计数 +1
+  globalScore++;
+  scoreEl.textContent = globalScore;
+  
+  scoreTitle.classList.add('up');
+  setTimeout(() => scoreTitle.classList.remove('up'), 200);
+
+  // 节点庆祝
+  if ([50,100,150,200].includes(globalScore)) {
+    showCelebrate(globalScore);
+  }
+
+  const star = document.createElement('div');
+  star.className = 'star';
+
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  star.style.setProperty('--star-color', color);
+  star.innerHTML = starSVG(color);
+
+  // 大小随机
+  const size = 22 + Math.random() * 18;
+  star.style.width = size + 'px';
+  star.style.height = size + 'px';
+
+  // 角度随机
+  const rot = Math.random() * 360;
+  star.style.setProperty('--rotate', rot + 'deg');
+
+  // 位置
+  const x = 10 + Math.random() * 80;
+  const y = 12 + Math.random() * 82;
+  star.style.left = x + '%';
+  star.style.top = y + '%';
+
+  starsContainer.appendChild(star);
+  vibrateShort();
+}
+
+// 庆祝特效
+function showCelebrate(num) {
+  const el = document.createElement('div');
+  el.className = 'celebration';
+  el.textContent = `达成${num}！`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+
+  // 温和音效
+  try {
+    const a = new Audio(
+      'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdI2Mmlota29CiJyJVJmflp2elZOWh45cdqCVdJmvnZOVipqdj5hfgJ+fWlRYiJqfbZCUk5ibnaJgdnaBj2hzdJeoi5GVkZg2XWc4UpJeaZpwnJZbZJ6SnKGKo7hzdJOdZJ2Yl5hVeaOXeJmrn55kjpKeaKCdcaSZbZGXk51whJqea5h1ipKboLJBc5hzd5tjeomZl55kjpKeapA='
+    );
+    a.volume = 0.25;
+    a.play().catch(() => {});
+  } catch (e) {}
+}
+
+// 长按
+function startHold() {
+  if (count <= 0) return;
+  if (!isRunning) startTimer();
+  addStar();
+  holdTimer = setInterval(() => {
+    addStar();
+  }, 110);
+}
+function stopHold() {
+  clearInterval(holdTimer);
+}
+
+hammerBtn.addEventListener('mousedown', startHold);
+hammerBtn.addEventListener('mouseup', stopHold);
+hammerBtn.addEventListener('mouseleave', stopHold);
+
+hammerBtn.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  startHold();
+});
+hammerBtn.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  stopHold();
+});
+</script>
+</body>
+</html>
